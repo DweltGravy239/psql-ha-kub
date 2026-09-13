@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: etcd
+  ports:
+    - name: client
+      port: 2379
+    - name: peer
+      port: 2380
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+spec:
+  serviceName: etcd
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: etcd
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: etcd
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:v3.5.16
+          ports:
+            - containerPort: 2379
+              name: client
+            - containerPort: 2380
+              name: peer
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ETCD_NAME
+              value: $(POD_NAME)
+            - name: ETCD_DATA_DIR
+              value: /var/lib/etcd/default
+            - name: ETCD_LISTEN_PEER_URLS
+              value: http://0.0.0.0:2380
+            - name: ETCD_LISTEN_CLIENT_URLS
+              value: http://0.0.0.0:2379
+            - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+              value: http://$(POD_NAME).etcd.$(POD_NAMESPACE).svc.cluster.local:2380
+            - name: ETCD_ADVERTISE_CLIENT_URLS
+              value: http://$(POD_NAME).etcd.$(POD_NAMESPACE).svc.cluster.local:2379
+            - name: ETCD_INITIAL_CLUSTER
+              value: etcd-0=http://etcd-0.etcd.$(POD_NAMESPACE).svc.cluster.local:2380,etcd-1=http://etcd-1.etcd.$(POD_NAMESPACE).svc.cluster.local:2380,etcd-2=http://etcd-2.etcd.$(POD_NAMESPACE).svc.cluster.local:2380
+            - name: ETCD_INITIAL_CLUSTER_STATE
+              value: "new"
+            - name: ETCD_INITIAL_CLUSTER_TOKEN
+              value: etcd-cluster
+            - name: ETCD_HEARTBEAT_INTERVAL
+              value: "100"
+            - name: ETCD_ELECTION_TIMEOUT
+              value: "1000"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/etcd
+

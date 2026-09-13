@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: patroni
+spec:
+  clusterIP: None
+  selector:
+    app: patroni
+  ports:
+    - name: client
+      port: 8008
+    - name: postgresql
+      port: 5432
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-creds
+type: Opaque
+stringData:
+  superuser-password: P@ssw0rd
+  rewind-password: P@ssw0rd
+  replica-password: Qwerty12345
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patroni-config
+data:
+  patroni.yaml: |
+    scope: cluster-patroni
+    namespace: /db/
+    etcd3:
+      hosts: etcd-0.etcd:2379,etcd-1.etcd:2379,etcd-2.etcd:2379
+    bootstrap:
+      dcs:
+        ttl: 30
+        loop_wait: 10
+        retry_timeout: 10
+        maximum_lag_on_failover: 1048576
+        postgresql:
+          use_pg_rewind: true
+          parameters:
+            autovacuum_analyze_scale_factor: 0.01
+        initdb:
+          - encoding: UTF8
+    postgresql:
+      data_dir: /var/lib/postgresql/data/pgdata
+      bin_dir: /usr/lib/postgresql/16/bin
+      pg_hba:
+        - host replication replicator 0.0.0.0/0 md5
+        - host all all 0.0.0.0/0 md5
+      parameters:
+        unix_socket_directories: '/var/run/postgresql'
+    tags:
+      nofailover: false
+      noloadbalance: false
+      clonefrom: false
+      nosync: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: 
+  name: patroni
+spec:
+  serviceName: patroni
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: patroni
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+  template:
+    metadata:
+      labels:
+        app: patroni
+    spec:
+      serviceAccountName: patroni
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: patroni
+      containers:
+        - name: patroni
+          image: patroni-custom:16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8008
+              name: client
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: PATRONI_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PATRONI_RESTAPI_LISTEN
+              value: 0.0.0.0:8008
+            - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+              value: $(PATRONI_NAME).patroni.$(POD_NAMESPACE).svc.cluster.local:8008
+            - name: PATRONI_POSTGRESQL_LISTEN
+              value: 0.0.0.0:5432
+            - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+              value: $(PATRONI_NAME).patroni.$(POD_NAMESPACE).svc.cluster.local:5432
+            - name: PATRONI_SUPERUSER_USERNAME
+              value: postgres
+            - name: PATRONI_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-creds
+                  key: superuser-password
+            - name: PATRONI_REWIND_USERNAME
+              value: rewind
+            - name: PATRONI_REWIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-creds
+                  key: rewind-password
+            - name: PATRONI_REPLICATION_USERNAME
+              value: replicator
+            - name: PATRONI_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-creds
+                  key: replica-password
+          volumeMounts:
+            - name: patroni-config
+              mountPath: /etc/patroni.yaml
+              subPath: patroni.yaml
+              readOnly: true
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            - name: DATA_SOURCE_URI
+              value: localhost:5432/postgres?sslmode=disable
+            - name: DATA_SOURCE_USER
+              value: postgres
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: pg-creds
+                  key: superuser-password
+      volumes:
+        - name: patroni-config
+          configMap:
+            name: patroni-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: patroni
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: patroni
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "patch", "update", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "patch", "update", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: 
+  name: patroni
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: patroni
+subjects:
+  - kind: ServiceAccount
+    name: patroni

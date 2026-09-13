@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: haproxy-config
+data:
+  haproxy.cfg: |
+    global
+        maxconn 200
+    defaults
+        log     global
+        mode    tcp
+        option  httplog
+        option  dontlognull
+        timeout connect 5000
+        timeout client  30m
+        timeout server  30m
+    listen postgres
+        bind *:5000
+        mode tcp
+        option httpchk GET /primary
+        http-check expect status 200
+        default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+        server patroni1 patroni-0.patroni:5432 maxconn 100 check port 8008
+        server patroni2 patroni-1.patroni:5432 maxconn 100 check port 8008
+        server patroni3 patroni-2.patroni:5432 maxconn 100 check port 8008
+    listen stats
+        mode http
+        bind *:7000
+        stats enable
+        stats uri /
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: haproxy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: haproxy
+  template:
+    metadata:
+      labels:
+        app: haproxy
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: haproxy
+      containers:
+        - name: haproxy
+          image: haproxy:2.9
+          ports:
+            - name: postgresql
+              containerPort: 7000
+            - name: haproxy
+              containerPort: 5000
+          volumeMounts:
+            - name: haproxy-config
+              mountPath: /usr/local/etc/haproxy/haproxy.cfg
+              subPath: haproxy.cfg
+              readOnly: true
+      volumes:
+        - name: haproxy-config
+          configMap:
+            name: haproxy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: haproxy
+spec:
+  selector:
+    app: haproxy
+  ports:
+    - port: 5000
+      targetPort: 5000
