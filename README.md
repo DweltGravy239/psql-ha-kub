@@ -68,9 +68,9 @@ kubectl get nodes
 ### 2. Разметка зон
  
 ```bash
-kubectl label node patroni-1 topology.kubernetes.io/zone=zone-a
-kubectl label node patroni-2 topology.kubernetes.io/zone=zone-b
-kubectl label node patroni-3 topology.kubernetes.io/zone=zone-c
+kubectl label node <нода 1> topology.kubernetes.io/zone=zone-a
+kubectl label node <нода 2> topology.kubernetes.io/zone=zone-b
+kubectl label node <нода 3> topology.kubernetes.io/zone=zone-c
  
 kubectl get nodes -L topology.kubernetes.io/zone
 ```
