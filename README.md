@@ -13,6 +13,8 @@ Prometheus и визуализируется в Grafana.
 |---|---|---|
 | Kubernetes (control plane) | встроенный etcd k3s | 2 из 3 |
 | СУБД (Patroni) | отдельный кластер etcd | 2 из 3 |
+
+<img width="982" height="893" alt="image" src="https://github.com/user-attachments/assets/855f2764-2122-49e9-9ae6-dc7f1b51008e" />
  
 ## Состав репозитория
  
