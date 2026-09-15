@@ -25,6 +25,7 @@ Prometheus и визуализируется в Grafana.
 | `manifests/pdb.yaml` | PodDisruptionBudget для etcd и Patroni |
 | `manifests/monitoring.yaml` | манифест Prometheus: RBAC, PVC, ConfigMap, Deployment, Service |
 | `manifests/grafana.yaml` | манифест Grafana: PVC, ConfigMap источника данных, Deployment, Service |
+| `grafana/dashboard.json` | дашборд Grafana: текущий лидер, кластер без лидера, транзакции в секунду |
  
 ## Развёртывание
  
